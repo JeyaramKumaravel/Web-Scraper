@@ -137,7 +137,7 @@ class MoviesdaScraper:
                     
                     # Check for movie URLs (both sites)
                     is_movie = (
-                        ("-tamil-movie" in href or "-tamil-web-series" in href or
+                        ("-tamil-movie" in href or "-movie" in href or "-tamil-web-series" in href or
                          "-tamil-dubbed-movie" in href or "-tamil-dubbed-web-series" in href)
                         and text
                     )
@@ -211,8 +211,11 @@ class MoviesdaScraper:
             # Try without year too
             possible_urls.append(f"{base_url}/movie/{movie_slug}-tamil-dubbed-movie/")
         else:
+            # Moviesda patterns - try -movie/ first (preferred), then -tamil-movie/
             if year:
+                possible_urls.append(f"{base_url}/{movie_slug}-{year}-movie/")
                 possible_urls.append(f"{base_url}/{movie_slug}-{year}-tamil-movie/")
+            possible_urls.append(f"{base_url}/{movie_slug}-movie/")
             possible_urls.append(f"{base_url}/{movie_slug}-tamil-movie/")
         
         # Try each URL pattern
@@ -467,7 +470,83 @@ class MoviesdaScraper:
                         "is_direct_download": True  # These go straight to download page
                     })
         
+        # If no qualities found and URL contains "season", try scanning for moviesda episode URLs
+        if not qualities and "season" in movie_url.lower() and "moviesda" in base_url:
+            print("No qualities found, scanning for moviesda episode URLs...")
+            episodes = self._scan_moviesda_episodes(movie_url, base_url)
+            if episodes:
+                qualities = episodes
+        
         return qualities, images
+    
+    def _scan_moviesda_episodes(self, movie_url: str, base_url: str) -> list[dict]:
+        """
+        Scan for moviesda web series episodes by trying sequential episode URLs.
+        Moviesda episodes are at /download/{series-name}-season-{n}-epi-{n}/
+        
+        Args:
+            movie_url: URL of the series page
+            base_url: Base URL of the site
+            
+        Returns:
+            List of episode qualities
+        """
+        episodes = []
+        
+        # Extract series name and season from URL
+        # Try multiple URL formats:
+        # /{series-name}-season-01-2025-tamil-movie/
+        # /{series-name}-season-01-2025-movie-tamil-movie/
+        # /{series-name}-season-01-tamil-movie/
+        match = re.search(r"/([^/]+?)-season-(\d+)(?:-\d{4})?(?:-[^/]+)?-tamil-movie/?$", movie_url)
+        if not match:
+            # Try simpler pattern
+            match = re.search(r"/([^/]+)-season-(\d+)", movie_url)
+        
+        if not match:
+            print(f"Could not parse series URL: {movie_url}")
+            return []
+        
+        series_slug = match.group(1)
+        season_num = match.group(2)
+        
+        print(f"Scanning episodes for: {series_slug} Season {season_num}")
+        
+        # Try up to 20 episodes
+        for epi_num in range(1, 21):
+            epi_str = str(epi_num).zfill(2)
+            episode_url = f"{base_url}/download/{series_slug}-season-{season_num}-epi-{epi_str}/"
+            
+            print(f"Trying episode URL: {episode_url}")
+            soup = self._get_soup(episode_url)
+            
+            if soup:
+                # Check if page has download links
+                download_links = soup.select("div.dlink a")
+                if download_links:
+                    # Extract title from page
+                    title_tag = soup.find("title")
+                    episode_title = f"Episode {epi_num}"
+                    if title_tag:
+                        episode_title = title_tag.get_text(strip=True).split(" - ")[0]
+                    
+                    episodes.append({
+                        "quality": episode_title,
+                        "url": episode_url,
+                        "is_direct_download": True
+                    })
+                    print(f"Found: {episode_title}")
+                else:
+                    # No download links, likely end of series
+                    break
+            else:
+                # Episode doesn't exist, likely end of series
+                break
+        
+        # Reverse for ascending order if needed
+        # episodes.reverse()
+        
+        return episodes
     
     def _get_quality_from_original_page(self, original_url: str, base_url: str = None) -> list[dict]:
         """
@@ -739,7 +818,7 @@ class MoviesdaScraper:
             return None
         
         # CDN domains that serve MP4 files
-        cdn_domains = ["biggshare", "hotshare", "dubshare", "dubmv", "uptodub"]
+        cdn_domains = ["biggshare", "hotshare", "dubshare", "dubmv", "uptodub", "uptomkv"]
         
         # Look for download server links on this page
         for div in soup.select("div.dlink"):
@@ -790,7 +869,7 @@ class MoviesdaScraper:
             return None
         
         # CDN domains that serve MP4 files
-        cdn_domains = ["biggshare", "hotshare", "dubshare", "uptodub"]
+        cdn_domains = ["biggshare", "hotshare", "dubshare", "uptodub", "uptomkv"]
         
         # Look for MP4 links
         for link in soup.find_all("a", href=True):
@@ -839,45 +918,59 @@ class MoviesdaScraper:
                 # Extract downloads from this page
                 print(f"Getting downloads from: {quality['url']}")
                 
-                # Get the page and extract download links
+                # Get the page
                 quality_soup = self._get_soup(quality["url"])
                 if quality_soup:
                     downloads = []
-                    current_download = None
                     
-                    # Parse list items for download info
-                    for li in quality_soup.find_all("li"):
-                        link = li.find("a", href=True)
-                        if link:
-                            href = link.get("href", "")
-                            text = link.get_text(strip=True)
-                            
-                            if "/download/" in href:
-                                from urllib.parse import urlparse
-                                parsed = urlparse(quality["url"])
-                                base_url = f"{parsed.scheme}://{parsed.netloc}"
-                                
-                                if href.startswith("http"):
-                                    download_url = href
-                                else:
-                                    download_url = urljoin(base_url, href)
-                                
-                                # Get MP4 URL from download page
-                                server_links = self._get_server_links(download_url)
-                                
-                                current_download = {
-                                    "filename": text,
-                                    "intermediate_url": download_url,
-                                    "direct_links": server_links,
-                                    "file_size": ""
-                                }
-                                downloads.append(current_download)
+                    from urllib.parse import urlparse
+                    parsed = urlparse(quality["url"])
+                    base_url = f"{parsed.scheme}://{parsed.netloc}"
+                    
+                    # First check if this page has div.dlink server links directly (moviesda episode pages)
+                    dlink_servers = quality_soup.select("div.dlink a")
+                    if dlink_servers:
+                        # This is a moviesda download page - get server links directly
+                        server_links = self._get_server_links(quality["url"])
                         
-                        # Check for file size info
-                        li_text = li.get_text(strip=True)
-                        size_match = re.search(r"File Size[:\s]*(\d+\.?\d*\s*[GMKT]B)", li_text, re.IGNORECASE)
-                        if size_match and current_download:
-                            current_download["file_size"] = size_match.group(1)
+                        downloads.append({
+                            "filename": quality["quality"],
+                            "intermediate_url": quality["url"],
+                            "direct_links": server_links,
+                            "file_size": ""
+                        })
+                    else:
+                        # Otherwise parse list items for download info (isaidub style)
+                        current_download = None
+                        
+                        for li in quality_soup.find_all("li"):
+                            link = li.find("a", href=True)
+                            if link:
+                                href = link.get("href", "")
+                                text = link.get_text(strip=True)
+                                
+                                if "/download/" in href:
+                                    if href.startswith("http"):
+                                        download_url = href
+                                    else:
+                                        download_url = urljoin(base_url, href)
+                                    
+                                    # Get MP4 URL from download page
+                                    server_links = self._get_server_links(download_url)
+                                    
+                                    current_download = {
+                                        "filename": text,
+                                        "intermediate_url": download_url,
+                                        "direct_links": server_links,
+                                        "file_size": ""
+                                    }
+                                    downloads.append(current_download)
+                            
+                            # Check for file size info
+                            li_text = li.get_text(strip=True)
+                            size_match = re.search(r"File Size[:\s]*(\d+\.?\d*\s*[GMKT]B)", li_text, re.IGNORECASE)
+                            if size_match and current_download:
+                                current_download["file_size"] = size_match.group(1)
                     
                     quality_info = {
                         "quality": quality["quality"],
