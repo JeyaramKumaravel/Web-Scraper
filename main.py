@@ -1017,15 +1017,53 @@ class MoviesdaScraper:
         return results
 
 
+def build_category_urls() -> list[str]:
+    """
+    Build category URLs dynamically from .env configuration.
+    
+    Uses:
+    - MOVIESDA_DOMAIN: e.g., moviesda15.com (change when domain changes)
+    - ISAIDUB_DOMAIN: e.g., isaidub.love (change when domain changes)
+    - SCRAPE_YEAR: e.g., 2025 (change for different year content)
+    - SITES_TO_SCRAPE: comma-separated, e.g., moviesda,isaidub
+    
+    Returns:
+        List of fully constructed category URLs
+    """
+    # Read configuration
+    moviesda_domain = os.getenv("MOVIESDA_DOMAIN", "moviesda15.com")
+    isaidub_domain = os.getenv("ISAIDUB_DOMAIN", "isaidub.love")
+    scrape_year = os.getenv("SCRAPE_YEAR", "2025")
+    sites_to_scrape = os.getenv("SITES_TO_SCRAPE", "moviesda,isaidub").lower()
+    
+    # Also support legacy CATEGORY_URLS for backward compatibility
+    legacy_urls = os.getenv("CATEGORY_URLS", "").strip().strip("'\"")
+    if legacy_urls:
+        return [url.strip() for url in legacy_urls.split(",") if url.strip()]
+    
+    category_urls = []
+    sites = [s.strip() for s in sites_to_scrape.split(",") if s.strip()]
+    
+    for site in sites:
+        if site == "moviesda":
+            # Moviesda URL pattern: https://moviesda15.com/tamil-2025-movies/
+            url = f"https://{moviesda_domain}/tamil-{scrape_year}-movies/"
+            category_urls.append(url)
+        elif site == "isaidub":
+            # Isaidub URL pattern: https://isaidub.love/tamil-dubbed-movies-2025/
+            url = f"https://{isaidub_domain}/tamil-dubbed-movies-{scrape_year}/"
+            category_urls.append(url)
+    
+    return category_urls
+
+
 def main():
     """Main function to run the scraper."""
     # All configuration now comes from .env file
     scraper = MoviesdaScraper()
     
-    # Load settings from environment
-    # Support comma-separated list of category URLs for multi-site scraping
-    category_urls_str = os.getenv("CATEGORY_URLS", os.getenv("CATEGORY_URL", "https://moviesda15.com/tamil-2025-movies/"))
-    category_urls = [url.strip() for url in category_urls_str.split(",") if url.strip()]
+    # Load settings from environment - now supports dynamic URL construction
+    category_urls = build_category_urls()
     
     max_pages = int(os.getenv("MAX_PAGES", "1"))
     max_movies = int(os.getenv("MAX_MOVIES", "5"))
