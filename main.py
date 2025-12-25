@@ -1100,28 +1100,31 @@ def main():
             print(f"[{idx+1}/{len(search_list)}] Searching for: '{movie_name}'")
             print(f"{'='*50}")
             
-            # Search on all base URLs until we find a match
-            found = False
+            # Search on ALL base URLs to get results from each site
+            found_count = 0
             for base_url in base_urls:
                 # First try A-Z index search
                 matching_movies = scraper.search_movie(movie_name, base_url=base_url, max_results=1)
                 
-                # If not found, try smart search with Google site: operator
+                # If not found, try smart search with URL guessing
                 if not matching_movies:
                     print(f"A-Z index search failed, trying smart search...")
                     matching_movies = scraper.smart_search_movie(movie_name, base_url=base_url, max_results=1)
                 
                 if matching_movies:
                     movie = matching_movies[0]  # Get first match
-                    print(f"\n--- Scraping: {movie['title']} ---")
+                    print(f"\n--- Scraping: {movie['title']} from {base_url} ---")
                     movie_data = scraper.scrape_movie(movie["url"])
                     movie_data["title"] = movie["title"]
+                    movie_data["source_site"] = base_url  # Track which site it came from
                     results.append(movie_data)
-                    found = True
-                    break  # Found on this site, move to next movie
+                    found_count += 1
+                    # Continue to search on other sites (no break!)
             
-            if not found:
+            if found_count == 0:
                 print(f"\nNo movies found matching '{movie_name}' on any site")
+            else:
+                print(f"\nFound '{movie_name}' on {found_count} site(s)")
     else:
         # Category mode - scrape from all category URLs
         print(f"\nCategory URLs: {len(category_urls)} sites")
