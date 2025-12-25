@@ -484,6 +484,34 @@ class MoviesdaScraper:
             if episodes:
                 qualities = episodes
         
+        # If no qualities found on isaidub, check for direct episode download links (TV series)
+        # isaidub TV series have episodes listed directly with /download/page/ links
+        if not qualities and is_isaidub:
+            print("No quality folders found, scanning for direct episode links...")
+            episode_downloads = []
+            for div in soup.select("div.f"):
+                link = div.find("a", href=True)
+                if link:
+                    href = link.get("href", "")
+                    text = link.get_text(strip=True)
+                    
+                    # Check for direct download page links (e.g., /download/page/100896/)
+                    if "/download/" in href:
+                        if href.startswith("http"):
+                            download_url = href
+                        else:
+                            download_url = urljoin(base_url, href)
+                        
+                        print(f"Found episode: {text}")
+                        episode_downloads.append({
+                            "quality": text,
+                            "url": download_url,
+                            "is_episode_download": True  # Direct download, no intermediate pages
+                        })
+            
+            if episode_downloads:
+                qualities = episode_downloads
+        
         return qualities, images
     
     def _scan_moviesda_episodes(self, movie_url: str, base_url: str) -> list[dict]:
@@ -1096,6 +1124,21 @@ class MoviesdaScraper:
                         "quality": quality["quality"],
                         "downloads": []
                     }
+            # Check for direct episode download (isaidub TV series episodes)
+            elif quality.get("is_episode_download"):
+                # This is a direct download page URL - get server links directly
+                print(f"Getting episode server links: {quality['url']}")
+                server_links = self._get_server_links(quality["url"])
+                
+                quality_info = {
+                    "quality": quality["quality"],
+                    "downloads": [{
+                        "filename": quality["quality"],
+                        "intermediate_url": quality["url"],
+                        "direct_links": server_links,
+                        "file_size": ""
+                    }]
+                }
             else:
                 # Normal flow - get download links from quality page
                 quality_info = {
