@@ -1155,11 +1155,17 @@ def save_to_m3u(results: list[dict], output_dir: str = "playlists") -> None:
     Save scraped results to separate M3U playlist files per movie.
     Each movie gets its own .m3u file named after the movie title.
     
+    Format:
+    #EXTM3U
+    #EXTINF:-1 group-title="Series" tvg-logo="...",Display Title
+    https://...mp4
+    
     Args:
         results: List of movie data dictionaries
         output_dir: Directory to save M3U files (default: "playlists")
     """
     import os
+    from urllib.parse import urlparse, unquote
     
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -1193,49 +1199,39 @@ def save_to_m3u(results: list[dict], output_dir: str = "playlists") -> None:
         with open(m3u_path, "w", encoding="utf-8") as f:
             # Write M3U header
             f.write("#EXTM3U\n")
-            f.write(f"# Movie: {title}\n\n")
             
             for quality in movie.get("qualities", []):
-                quality_name = quality.get("quality", "")
-                
                 for dl in quality.get("downloads", []):
-                    filename = dl.get("filename", "")
-                    file_size = dl.get("file_size", "")
-                    
                     for server in dl.get("direct_links", []):
                         mp4_url = server.get("mp4_url")
                         
                         if mp4_url:
-                            # Extract quality info (e.g., 720p, 1080p)
-                            quality_tag = ""
-                            if "1080p" in quality_name:
-                                quality_tag = "[1080p]"
-                            elif "720p" in quality_name:
-                                quality_tag = "[720p]"
-                            elif "480p" in quality_name:
-                                quality_tag = "[480p]"
-                            elif "360p" in quality_name:
-                                quality_tag = "[360p]"
+                            # Extract quality from MP4 URL filename (e.g., 1080p, 720p, 360p)
+                            parsed_url = urlparse(mp4_url)
+                            mp4_filename = unquote(parsed_url.path.split("/")[-1])
                             
-                            # Create display title
-                            display_title = f"{title} {quality_tag}"
-                            if file_size:
-                                display_title += f" ({file_size})"
+                            # Find quality pattern in filename
+                            quality_match = re.search(r'(1080p|720p|480p|360p)', mp4_filename, re.IGNORECASE)
+                            quality_str = quality_match.group(1) if quality_match else ""
                             
-                            # Write EXTINF line with metadata
-                            f.write(f"#EXTINF:-1")
+                            # Check if HD is in filename
+                            hd_suffix = " HD" if "HD" in mp4_filename else ""
+                            
+                            # Create clean display title: "Movie Title Year Quality HD"
+                            display_title = f"{title} {quality_str}{hd_suffix}".strip()
+                            
+                            # Write EXTINF line with metadata in the exact format:
+                            # #EXTINF:-1 group-title="..." tvg-logo="...",Title
+                            f.write(f'#EXTINF:-1 group-title="{content_type}"')
                             
                             # Add tvg-logo for poster if available
                             if poster_url:
                                 f.write(f' tvg-logo="{poster_url}"')
                             
-                            # Add group-title: Series if >4 videos, Movies otherwise
-                            f.write(f' group-title="{content_type}"')
-                            
                             f.write(f",{display_title}\n")
                             
                             # Write the actual URL
-                            f.write(f"{mp4_url}\n\n")
+                            f.write(f"{mp4_url}\n")
         
         created_files.append(m3u_path)
         print(f"Created: {m3u_path}")
